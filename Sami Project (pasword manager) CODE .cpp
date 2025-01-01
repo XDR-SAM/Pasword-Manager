@@ -1,3 +1,27 @@
+/*
+ * Author: Sami
+ * Email: [Your Email Address]
+ * Description:
+ * This program is a simple yet functional Password Manager developed in C++.
+ * It allows users to securely store, manage, and retrieve their account credentials 
+ * with features such as:
+ *   - Adding, viewing, searching, and deleting accounts.
+ *   - Generating strong random passwords.
+ *   - Encrypting and decrypting passwords using a basic Caesar cipher for security.
+ *   - Exporting account data to an HTML file for easier readability.
+ *
+ * Core concepts demonstrated in this program:
+ *   - File I/O operations for data persistence (passwords.txt and passwords.html).
+ *   - Use of structures (struct) for data encapsulation.
+ *   - Simple encryption and decryption techniques.
+ *   - Dynamic memory handling with vectors for account management.
+ *   - Utility functions for generating random passwords and formatting data.
+ *
+ * This project is designed to showcase practical applications of C++ programming
+ * in solving real-world problems. It reflects my passion for software development
+ * and serves as a stepping stone toward more advanced projects in the future.
+ */
+
 #include <iostream>
 #include <fstream>
 #include <string>
