@@ -1,6 +1,6 @@
 /*
  * Author: Sami
- * Email: [Your Email Address]
+ * Email: [tdxfarhan@gmail.com]
  * Description:
  * This program is a simple yet functional Password Manager developed in C++.
  * It allows users to securely store, manage, and retrieve their account credentials 
