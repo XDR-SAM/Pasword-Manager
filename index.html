@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P2P File Transfer - Made by Sami</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        background: #121212;
+        color: #fff;
+      }
+      #drop_zone {
+        border: 2px dashed #888;
+        padding: 20px;
+        width: 80%;
+        margin: 20px auto;
+        cursor: pointer;
+      }
+      #status {
+        margin-top: 10px;
+        font-size: 14px;
+      }
+      button {
+        background: #007bff;
+        color: white;
+        padding: 10px;
+        border: none;
+        cursor: pointer;
+      }
+      button:disabled {
+        background: #555;
+      }
+      footer {
+        margin-top: 20px;
+        font-size: 12px;
+        color: #aaa;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>P2P File Transfer</h2>
+    <p>Made by <b>Sami ❤️</b></p>
+    <p>
+      GitHub: <a href="https://github.com/XDR-SAM" target="_blank">@XDR-SAM</a>
+    </p>
+    <p>
+      Server:
+      <a href="https://p2p-file-transfer-server.onrender.com" target="_blank"
+        >Signaling Server</a
+      >
+    </p>
+
+    <div id="drop_zone">Drag & Drop File Here or Click to Upload</div>
+    <input type="file" id="fileInput" style="display: none" />
+    <br /><br />
+    <button id="connectBtn">Connect to Peer</button>
+    <p id="status">Waiting for connection...</p>
+
+    <div id="downloadLink" style="display: none; margin-top: 10px">
+      <p>
+        File received!
+        <a id="fileDownload" href="#" download>Click here to download</a>
+      </p>
+    </div>
+
+    <footer>© 2025 Sami | All Rights Reserved</footer>
+
+    <script>
+      (function () {
+        // -------------------------------
+        // Configuration & Global Variables
+        // -------------------------------
+        const SIGNALING_SERVER = "ws://p2p-file-transfer-server.onrender.com";
+        let peerConnection;
+        let dataChannel;
+        let ws;
+
+        // Object to store received file chunks
+        const receivedFiles = {};
+
+        // -------------------------------
+        // WebSocket Signaling Setup
+        // -------------------------------
+        function initWebSocket() {
+          ws = new WebSocket(SIGNALING_SERVER);
+
+          ws.onopen = () => {
+            console.log("Connected to signaling server.");
+          };
+
+          ws.onmessage = async (event) => {
+            let message;
+            try {
+              message = JSON.parse(event.data);
+            } catch (err) {
+              console.error("Error parsing signaling message:", err);
+              return;
+            }
+
+            // Handle ICE candidate messages
+            if (message.candidate) {
+              try {
+                await peerConnection.addIceCandidate(
+                  new RTCIceCandidate(message.candidate)
+                );
+                console.log("Added remote ICE candidate.");
+              } catch (err) {
+                console.error("Error adding ICE candidate:", err);
+              }
+            }
+            // Handle incoming offer
+            else if (message.offer) {
+              console.log("Received offer.");
+              if (!peerConnection) {
+                initPeerConnection();
+              }
+              await peerConnection.setRemoteDescription(
+                new RTCSessionDescription(message.offer)
+              );
+              const answer = await peerConnection.createAnswer();
+              await peerConnection.setLocalDescription(answer);
+              ws.send(JSON.stringify({ answer: answer }));
+            }
+            // Handle incoming answer
+            else if (message.answer) {
+              console.log("Received answer.");
+              await peerConnection.setRemoteDescription(
+                new RTCSessionDescription(message.answer)
+              );
+            }
+          };
+
+          ws.onerror = (error) => {
+            console.error("WebSocket error:", error);
+          };
+        }
+
+        // -------------------------------
+        // RTCPeerConnection & Data Channel Setup
+        // -------------------------------
+        function initPeerConnection() {
+          const configuration = {}; // Optionally add STUN/TURN servers here.
+          peerConnection = new RTCPeerConnection(configuration);
+
+          // Send local ICE candidates to the remote peer via signaling.
+          peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+              console.log("Local ICE candidate:", event.candidate);
+              ws.send(JSON.stringify({ candidate: event.candidate }));
+            }
+          };
+
+          // For the peer that did not create the data channel,
+          // listen for the remote data channel.
+          peerConnection.ondatachannel = (event) => {
+            console.log("Received data channel.");
+            dataChannel = event.channel;
+            setupDataChannel();
+          };
+        }
+
+        function setupDataChannel() {
+          dataChannel.onopen = () => {
+            console.log("Data channel is open.");
+            document.getElementById("status").innerText =
+              "Data channel open. Ready to send files!";
+          };
+
+          dataChannel.onclose = () => {
+            console.log("Data channel closed.");
+            document.getElementById("status").innerText =
+              "Data channel closed.";
+          };
+
+          dataChannel.onerror = (error) => {
+            console.error("Data channel error:", error);
+          };
+
+          dataChannel.onmessage = (event) => {
+            let received;
+            try {
+              received = JSON.parse(event.data);
+            } catch (err) {
+              console.error("Error parsing received chunk:", err);
+              return;
+            }
+
+            // Expected structure: { fileName, totalSize, offset, chunk }
+            if (
+              received.fileName &&
+              typeof received.offset === "number" &&
+              received.chunk
+            ) {
+              if (!receivedFiles[received.fileName]) {
+                // Initialize an entry for the incoming file.
+                receivedFiles[received.fileName] = {
+                  totalSize: received.totalSize,
+                  receivedSize: 0,
+                  chunks: [],
+                };
+              }
+              // Save the chunk (assumes chunks arrive in order).
+              const fileEntry = receivedFiles[received.fileName];
+              fileEntry.chunks.push(new Uint8Array(received.chunk));
+              fileEntry.receivedSize += received.chunk.length;
+
+              // If we've received all bytes, reassemble the file.
+              if (fileEntry.receivedSize >= fileEntry.totalSize) {
+                const fileBuffer = concatenateChunks(fileEntry.chunks);
+                const blob = new Blob([fileBuffer], {
+                  type: "application/octet-stream",
+                });
+                const url = URL.createObjectURL(blob);
+                const link = document.getElementById("fileDownload");
+                link.href = url;
+                link.download = received.fileName;
+                document.getElementById("downloadLink").style.display = "block";
+                document.getElementById("status").innerText =
+                  "File received: " + received.fileName;
+                // Clean up for future transfers.
+                delete receivedFiles[received.fileName];
+              }
+            }
+          };
+        }
+
+        // Helper: Concatenate an array of Uint8Arrays.
+        function concatenateChunks(chunks) {
+          const totalLength = chunks.reduce(
+            (acc, chunk) => acc + chunk.length,
+            0
+          );
+          const result = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const chunk of chunks) {
+            result.set(chunk, offset);
+            offset += chunk.length;
+          }
+          return result;
+        }
+
+        // -------------------------------
+        // File Sending in Chunks
+        // -------------------------------
+        function sendFileInChunks(file) {
+          const chunkSize = 16 * 1024; // 16 KB per chunk
+          let offset = 0;
+
+          function readSlice(o) {
+            const slice = file.slice(o, o + chunkSize);
+            const reader = new FileReader();
+
+            reader.onload = function (e) {
+              if (dataChannel.readyState !== "open") {
+                console.error("Data channel is not open. Cannot send chunk.");
+                return;
+              }
+
+              const arrayBuffer = e.target.result;
+              const byteArray = Array.from(new Uint8Array(arrayBuffer));
+              const chunkData = {
+                fileName: file.name,
+                totalSize: file.size,
+                offset: o,
+                chunk: byteArray,
+              };
+
+              dataChannel.send(JSON.stringify(chunkData));
+              offset += arrayBuffer.byteLength;
+
+              // Continue reading if there is more of the file.
+              if (offset < file.size) {
+                // Optionally pause if bufferedAmount is too high.
+                if (dataChannel.bufferedAmount > 16 * 1024 * 1024) {
+                  // 16 MB threshold
+                  setTimeout(() => readSlice(offset), 100);
+                } else {
+                  readSlice(offset);
+                }
+              } else {
+                console.log("File transfer complete.");
+              }
+            };
+
+            reader.onerror = function (err) {
+              console.error("Error reading file slice:", err);
+            };
+
+            reader.readAsArrayBuffer(slice);
+          }
+          readSlice(0);
+        }
+
+        // -------------------------------
+        // UI Event Listeners
+        // -------------------------------
+        // File input change: send file when user selects one.
+        document.getElementById("fileInput").addEventListener("change", (e) => {
+          const file = e.target.files[0];
+          if (file && dataChannel && dataChannel.readyState === "open") {
+            sendFileInChunks(file);
+          }
+        });
+
+        // Drag & drop support.
+        const dropZone = document.getElementById("drop_zone");
+        dropZone.addEventListener("click", () => {
+          document.getElementById("fileInput").click();
+        });
+        dropZone.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          dropZone.style.borderColor = "#007bff"; // Visual feedback.
+        });
+        dropZone.addEventListener("dragleave", () => {
+          dropZone.style.borderColor = "#888";
+        });
+        dropZone.addEventListener("drop", (e) => {
+          e.preventDefault();
+          dropZone.style.borderColor = "#888";
+          const file = e.dataTransfer.files[0];
+          if (file && dataChannel && dataChannel.readyState === "open") {
+            sendFileInChunks(file);
+          }
+        });
+
+        // "Connect to Peer" button: sets up the peer connection and data channel.
+        document
+          .getElementById("connectBtn")
+          .addEventListener("click", async () => {
+            // Initialize signaling if not already connected.
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+              initWebSocket();
+            }
+            // Initialize the peer connection.
+            if (!peerConnection) {
+              initPeerConnection();
+            }
+            // If you're the initiator, create a data channel.
+            if (!dataChannel) {
+              dataChannel = peerConnection.createDataChannel("fileTransfer", {
+                ordered: true,
+              });
+              setupDataChannel();
+            }
+            // Create and send an offer.
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            ws.send(JSON.stringify({ offer: offer }));
+            document.getElementById("status").innerText =
+              "Offer sent, waiting for answer...";
+          });
+
+        // -------------------------------
+        // Initialize on Page Load
+        // -------------------------------
+        initWebSocket();
+      })();
+    </script>
+  </body>
+</html>
